@@ -26047,7 +26047,9 @@ test('trace lineage: _startTraceRun and replay plumb parent ids in both builds',
   assert.match(chromeCloudRuns, /const parentTraceRunId = parentRun\?\.traceRunId \|\| null;/, 'cloud-runs does not use the completed parent trace');
   assert.match(chromeCloudRuns, /workflowTrace\.getRun\(parentTraceRunId\)/, 'cloud-runs does not resolve the parent trace session');
   assert.match(chromeCloudRuns, /parentRunId: parentTraceRunId,[\s\S]*?parentSessionId: parentTraceSessionId,/, 'cloud-runs does not thread resolved parent lineage');
-  assert.ok(!fs.existsSync(path.join(ROOT, 'src/firefox/src/cloud-runs.js')), 'Firefox has no cloud-runs module — lineage threading is Chrome-only by platform boundary');
+  const firefoxCloudRuns = fs.readFileSync(path.join(ROOT, 'src/firefox/src/cloud-runs.js'), 'utf8');
+  assert.match(firefoxCloudRuns, /const parentTraceRunId = parentRun\?\.traceRunId \|\| null;/, 'Firefox cloud-runs does not use the completed parent trace');
+  assert.match(firefoxCloudRuns, /parentRunId: parentTraceRunId,[\s\S]*?parentSessionId: parentTraceSessionId,/, 'Firefox cloud-runs does not thread resolved parent lineage');
 });
 
 test('saved workflow replay captures its source lineage before claiming the tab', async () => {

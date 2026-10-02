@@ -31,6 +31,8 @@ flowchart LR
 
 The French guide ([cloud-bridge-test-guide.fr.md](cloud-bridge-test-guide.fr.md)) also has a message-sequence diagram.
 
+**Chrome vs Firefox.** Chrome (MV3) hosts the socket in an offscreen document (`src/chrome/src/offscreen/cloud-bridge.js`). Firefox (MV2) has no offscreen documents, so `src/firefox/src/cloud-bridge.js` is a module that runs in the persistent background page and hands commands directly to `handleMessage`. The protocol, storage keys, approval rules and Settings tab are identical; `src/firefox/src/cloud-runs.js` mirrors the Chrome controller and receives the bridge as an injected dependency.
+
 - `cloud-runs.js` reads the persistent identity from `chrome.storage.local` and passes it to the offscreen page with the existing `cloud-bridge-start` message (the offscreen page has no storage access).
 - `offscreen/cloud-bridge.js` sends the enriched `hello` and tracks the approval state **per socket**.
 - Command routing (`cloud_run`, `cloud_status`, `cloud_respond`, `cloud_abort`, workflows, scheduled jobs) and payloads are unchanged.

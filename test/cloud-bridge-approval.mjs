@@ -186,3 +186,140 @@ test('end to end against the example server', async () => {
     await server.close();
   }
 });
+
+// ---- Firefox: same protocol, socket lives in the background page ----
+const { createCloudBridge } = await import('../src/firefox/src/cloud-bridge.js');
+const { createCloudRunController: createFxController } = await import('../src/firefox/src/cloud-runs.js');
+
+function fxHarness({ WebSocketImpl, dispatch } = {}) {
+  const sockets = [];
+  const calls = [];
+  class FakeWebSocket {
+    static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
+    constructor(url) { this.url = url; this.readyState = 0; this.listeners = new Map(); this.sent = []; sockets.push(this); }
+    addEventListener(type, cb) { this.listeners.set(type, cb); }
+    send(v) { this.sent.push(JSON.parse(v)); }
+    close() { this.readyState = 3; this.listeners.get('close')?.({}); }
+    emit(type, value = {}) { if (type === 'open') this.readyState = 1; this.listeners.get(type)?.(value); }
+    receive(obj) { return this.emit('message', { data: JSON.stringify(obj) }); }
+  }
+  const bridge = createCloudBridge({
+    WebSocketImpl: WebSocketImpl || FakeWebSocket,
+    nav: { userAgent: 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0', platform: 'Linux x86_64' },
+    dispatch: dispatch || (async (m) => { calls.push(m); return { runId: 'r1', status: 'running' }; }),
+  });
+  return { bridge, sockets, calls };
+}
+
+test('firefox: hello, pending refusal, approval, rejection', async () => {
+  const h = fxHarness();
+  h.bridge.start({ url: 'ws://127.0.0.1:17374/extension', ...IDENTITY });
+  const s = h.sockets[0];
+  s.emit('open');
+  const hello = s.sent[0];
+  assert.deepEqual({ ...hello.browser }, { name: 'Firefox', version: '140.0' });
+  assert.equal(hello.auth.token, 'secret-token');
+  assert.equal(hello.browserId, 'browser-1');
+  assert.equal(hello.platform, 'Linux x86_64');
+  assert.equal(JSON.stringify(h.bridge.status()).includes('secret-token'), false);
+
+  s.receive({ type: 'connection_pending' });
+  s.receive(cmd);
+  await tick();
+  assert.equal(s.sent.find(m => m.id === 'c1').code, 'connection_not_approved');
+  assert.equal(h.calls.length, 0);
+
+  s.receive({ type: 'connection_approved', browserId: 'browser-1' });
+  s.receive({ ...cmd, id: 'c2' });
+  await tick();
+  assert.equal(s.sent.find(m => m.id === 'c2').ok, true);
+  assert.deepEqual({ ...h.calls[0] }, { runId: 'r1', target: 'background', action: 'cloud_status' });
+
+  s.receive({ id: 'bad', action: 'get_providers', payload: {} });
+  await tick();
+  assert.match(s.sent.find(m => m.id === 'bad').error, /unsupported/i);
+
+  s.receive({ type: 'connection_rejected', reason: 'no' });
+  assert.equal(h.bridge.status().approval, 'rejected');
+  assert.equal(s.readyState, 3);
+  h.bridge.stop();
+});
+
+test('firefox: reconnect requires a fresh approval', async () => {
+  const h = fxHarness();
+  h.bridge.start({ url: 'ws://127.0.0.1:17374/extension', ...IDENTITY });
+  const first = h.sockets[0];
+  first.emit('open');
+  first.receive({ type: 'connection_approved' });
+  first.close();
+  assert.equal(h.bridge.status().approval, 'pending');
+  await tick(700); // first backoff is 500 ms
+  const second = h.sockets[1];
+  assert.ok(second, 'reconnected');
+  second.emit('open');
+  second.receive(cmd);
+  await tick();
+  assert.equal(second.sent.find(m => m.id === 'c1').code, 'connection_not_approved');
+  assert.equal(h.calls.length, 0);
+  h.bridge.stop();
+});
+
+test('firefox: without a token behaviour is legacy', async () => {
+  const h = fxHarness();
+  h.bridge.start({ url: 'ws://127.0.0.1:17374/extension' });
+  h.sockets[0].emit('open');
+  assert.equal(h.sockets[0].sent[0].auth, undefined);
+  h.sockets[0].receive(cmd);
+  await tick();
+  assert.equal(h.calls.length, 1);
+  assert.throws(() => { throw new Error(h.bridge.start({ url: 'wss://evil.example/x' }).error); }, /localhost/);
+  h.bridge.stop();
+});
+
+test('firefox: controller persists identity and feeds it to the bridge', async () => {
+  const store = {};
+  const started = [];
+  const api = {
+    storage: { local: {
+      get: async (keys) => Object.fromEntries([].concat(keys).map(k => [k, store[k]]).filter(([, v]) => v !== undefined)),
+      set: async (obj) => { Object.assign(store, obj); },
+    } },
+    runtime: { getManifest: () => ({ version: '9.9.9' }) },
+  };
+  const controller = createFxController({
+    chromeApi: api,
+    agent: {},
+    bridge: { start: (m) => { started.push(m); return { enabled: true }; }, stop: () => ({ enabled: false }), status: () => ({}) },
+  });
+  store.webbrainCloudBridgeEnabled = true;
+  store.webbrainCloudBridgeToken = 'tok';
+  await controller.syncBridge();
+  assert.equal(started[0].token, 'tok');
+  assert.equal(started[0].extensionVersion, '9.9.9');
+  assert.ok(store.webbrainCloudBridgeInstallationId, 'installation id generated once');
+  assert.equal(started[0].browserId, store.webbrainCloudBridgeInstallationId, 'browserId defaults to the installation id');
+  await controller.syncBridge();
+  assert.equal(started[1].installationId, started[0].installationId, 'installation id is stable');
+});
+
+test('firefox: end to end against the example server', async () => {
+  const received = [];
+  const server = await startApprovalServer({ port: 0, token: 'secret-token', onMessage: m => received.push(m) });
+  const h = fxHarness({ WebSocketImpl: WebSocket });
+  try {
+    h.bridge.start({ url: `ws://127.0.0.1:${server.port}/extension`, ...IDENTITY });
+    for (let i = 0; i < 50 && ![...server.sessions].some(s => s.state === 'pending'); i++) await tick(20);
+    const session = [...server.sessions][0];
+    assert.equal(session.state, 'pending');
+    session.send(cmd);
+    for (let i = 0; i < 50 && !received.some(m => m.id === 'c1'); i++) await tick(20);
+    assert.equal(received.find(m => m.id === 'c1').code, 'connection_not_approved');
+    session.approve();
+    session.send({ ...cmd, id: 'c2' });
+    for (let i = 0; i < 50 && !received.some(m => m.id === 'c2'); i++) await tick(20);
+    assert.equal(received.find(m => m.id === 'c2').ok, true);
+  } finally {
+    h.bridge.stop();
+    await server.close();
+  }
+});

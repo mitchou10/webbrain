@@ -21,14 +21,10 @@ const statusEl = $('cb-status');
 const statusText = $('cb-status-text');
 const testBtn = $('cb-test');
 
-function send(action, data = {}) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ target: 'background', action, ...data }, (response) => {
-      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-      else if (response?.error) reject(new Error(response.error));
-      else resolve(response);
-    });
-  });
+async function send(action, data = {}) {
+  const response = await browser.runtime.sendMessage({ target: 'background', action, ...data });
+  if (response?.error) throw new Error(response.error);
+  return response;
 }
 
 function setStatus(state, message) {
@@ -58,7 +54,7 @@ function render(status = {}) {
 }
 
 async function load() {
-  const stored = await chrome.storage.local.get(Object.values(KEYS));
+  const stored = await browser.storage.local.get(Object.values(KEYS));
   enabled.checked = !!stored[KEYS.enabled];
   urlInput.value = stored[KEYS.url] || DEFAULT_URL;
   tokenInput.value = stored[KEYS.token] || '';
@@ -78,9 +74,9 @@ async function save() {
   urlInput.value = url;
   const patch = { [KEYS.url]: url, [KEYS.enabled]: enabled.checked, [KEYS.token]: tokenInput.value.trim() };
   const name = nameInput.value.trim();
-  await chrome.storage.local.set(patch);
-  if (name) await chrome.storage.local.set({ [KEYS.browserId]: name });
-  else await chrome.storage.local.remove(KEYS.browserId);
+  await browser.storage.local.set(patch);
+  if (name) await browser.storage.local.set({ [KEYS.browserId]: name });
+  else await browser.storage.local.remove(KEYS.browserId);
   return url;
 }
 
@@ -97,7 +93,7 @@ async function testConnection() {
       if (status.approval === 'rejected' || status.approval === 'approved' || (status.connected && status.approval === 'not_required')) break;
     }
     render(status);
-    const stored = await chrome.storage.local.get(KEYS.installationId);
+    const stored = await browser.storage.local.get(KEYS.installationId);
     installationEl.textContent = stored[KEYS.installationId] || '—';
   } catch (e) {
     setStatus('error', e.message);
@@ -115,7 +111,7 @@ enabled.addEventListener('change', async () => {
 });
 testBtn.addEventListener('click', testConnection);
 setInterval(refresh, 2000);
-chrome.storage.onChanged.addListener((changes, area) => {
+browser.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && Object.values(KEYS).some((k) => changes[k]) && !document.activeElement?.closest('#cb-card')) load();
 });
 load();

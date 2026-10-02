@@ -81,6 +81,14 @@ L'extension Chrome est directement chargeable depuis `src/chrome` (pas de build 
 
 > Après chaque modification du code : sur `chrome://extensions`, cliquer sur l'icône ↻ de WebBrain, puis recharger la page Settings.
 
+### Firefox
+
+1. Ouvrir `about:debugging#/runtime/this-firefox`.
+2. **Charger un module complémentaire temporaire…** et choisir `~/Documents/webbrain/src/firefox/manifest.json`.
+3. Ouvrir les préférences de WebBrain (`about:addons` → WebBrain → Préférences, ou la page Settings du panneau latéral) et aller dans l'onglet **Cloud Bridge**. Le reste du guide (serveur de test, scénarios A à F) est identique.
+
+Le module est temporaire : il disparaît au redémarrage de Firefox. Sur Firefox, la socket vit dans la page d'arrière-plan (pas de document offscreen) ; pour déboguer, `about:debugging` → WebBrain → **Inspecter**.
+
 Alternative (copie construite) : `npm run build:chrome` génère `build/chrome`, à charger de la même façon.
 
 ## 3. Lancer le serveur de test local
