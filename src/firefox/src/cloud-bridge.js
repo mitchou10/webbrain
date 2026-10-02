@@ -129,6 +129,8 @@ export function createCloudBridge({ dispatch, WebSocketImpl = globalThis.WebSock
           } else {
             approval = 'rejected';
             lastError = String(msg.reason || 'Connection rejected by backend');
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = null;
             try { nextSocket.close(); } catch {}
           }
           return;
