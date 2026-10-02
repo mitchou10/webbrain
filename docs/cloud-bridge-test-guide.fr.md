@@ -204,7 +204,7 @@ Problèmes fréquents :
 ## 7. Tests automatisés
 
 ```bash
-npm run test:cloud-bridge-approval   # 14 tests : identité hello, pending, approved, rejected, commande avant/après, reconnexion, mode sans token, e2e vs serveur d'exemple (Chrome et Firefox)
+npm run test:cloud-bridge-approval   # 18 tests (Chrome + Firefox) : hello, pending, approved, rejected, commande avant/après, reconnexion, minuteur annulé après refus, mode sans token, identité unique, e2e vs serveur d'exemple
 node test/run.js                     # suite complète existante (≈ 2400 tests)
 ```
 

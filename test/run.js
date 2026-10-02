@@ -26052,6 +26052,21 @@ test('trace lineage: _startTraceRun and replay plumb parent ids in both builds',
   assert.match(firefoxCloudRuns, /parentRunId: parentTraceRunId,[\s\S]*?parentSessionId: parentTraceSessionId,/, 'Firefox cloud-runs does not thread resolved parent lineage');
 });
 
+test('firefox: revoking the global API setting keeps a temporary cloud-run grant', () => {
+  const agent = new AgentFx({ getActive: () => ({ model: 'test-model' }) });
+  const tabId = 17855;
+  agent.conversations.set(tabId, []);
+  agent.setTemporaryApiMutationsAllowed(tabId, true);
+  agent.apiAllowedInjected.add(tabId);
+  agent.setAlwaysAllowApiMutations(true);
+  agent.setAlwaysAllowApiMutations(false);
+  assert.equal(agent.isApiMutationsAllowed(tabId), true);
+  assert.equal(agent.conversations.get(tabId).length, 0, 'no NOT ALLOWED note while the temporary grant is active');
+  assert.equal(agent.apiAllowedInjected.has(tabId), true);
+  agent.setTemporaryApiMutationsAllowed(tabId, false);
+  assert.equal(agent.conversations.get(tabId).length, 1, 'the note is appended once the last grant ends');
+});
+
 test('saved workflow replay captures its source lineage before claiming the tab', async () => {
   for (const [browser, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
     const tabId = browser === 'chrome' ? 17853 : 17854;

@@ -37,8 +37,8 @@ function harness({ WebSocketImpl, sendMessage = async () => ({ runId: 'r1', stat
       onMessage: { addListener: cb => { listener = cb; } },
       sendMessage: async m => { runtimeCalls.push(m); return sendMessage(m); },
     } },
-    setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length; },
-    clearTimeout: () => {},
+    setTimeout: (callback, delay) => { timers.push({ callback, delay, cleared: false }); return timers.length; },
+    clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].cleared = true; },
   });
   const start = (extra = IDENTITY, url = 'ws://127.0.0.1:17374/extension') => {
     let out; listener({ type: 'cloud-bridge-start', url, ...extra }, null, v => { out = v; }); return out;
@@ -153,6 +153,18 @@ test('reconnect requires a fresh approval', async () => {
   assert.equal(h.runtimeCalls.length, 1);
 });
 
+test('rejection cancels a pending backoff timer so the browser cannot reconnect', async () => {
+  const h = harness();
+  h.start();
+  h.sockets[0].emit('open');
+  h.sockets[0].close(); // schedules a reconnect timer
+  assert.equal(h.timers.length, 1);
+  h.start(); // restart during backoff opens a new socket right away
+  h.sockets[1].emit('open');
+  h.sockets[1].receive({ type: 'connection_rejected', reason: 'nope' });
+  assert.equal(h.timers[0].cleared, true, 'pending timer must be cancelled');
+});
+
 test('without a token the legacy behaviour is unchanged', async () => {
   const h = harness();
   h.start({});
@@ -264,6 +276,19 @@ test('firefox: reconnect requires a fresh approval', async () => {
   h.bridge.stop();
 });
 
+test('firefox: rejection cancels a pending backoff timer', async () => {
+  const h = fxHarness();
+  h.bridge.start({ url: 'ws://127.0.0.1:17374/extension', ...IDENTITY });
+  h.sockets[0].emit('open');
+  h.sockets[0].close(); // schedules a 500 ms reconnect
+  h.bridge.start({ url: 'ws://127.0.0.1:17374/extension', ...IDENTITY });
+  h.sockets[1].emit('open');
+  h.sockets[1].receive({ type: 'connection_rejected' });
+  await tick(700);
+  assert.equal(h.sockets.length, 2, 'no third socket after rejection');
+  h.bridge.stop();
+});
+
 test('firefox: without a token behaviour is legacy', async () => {
   const h = fxHarness();
   h.bridge.start({ url: 'ws://127.0.0.1:17374/extension' });
@@ -323,3 +348,29 @@ test('firefox: end to end against the example server', async () => {
     await server.close();
   }
 });
+
+for (const [label, createController] of [['chrome', null], ['firefox', createFxController]]) {
+  test(`${label}: concurrent bridge starts share one installation id`, async () => {
+    const { createCloudRunController: make } = label === 'chrome'
+      ? await import('../src/chrome/src/cloud-runs.js')
+      : { createCloudRunController: createController };
+    const store = {};
+    const started = [];
+    const api = {
+      storage: { local: {
+        // yield so two callers can interleave between read and write
+        get: async (keys) => { await tick(5); return Object.fromEntries([].concat(keys).map(k => [k, store[k]]).filter(([, v]) => v !== undefined)); },
+        set: async (obj) => { await tick(5); Object.assign(store, obj); },
+      } },
+      runtime: { getManifest: () => ({ version: '1.0.0' }) },
+    };
+    const bridge = { start: (m) => { started.push(m); return {}; }, stop: () => ({}), status: () => ({}) };
+    const controller = make({ chromeApi: api, agent: {}, ensureOffscreen: async () => {}, bridge });
+    store.webbrainCloudBridgeEnabled = true;
+    if (label === 'chrome') api.runtime.sendMessage = async (m) => { started.push(m); return {}; };
+    await Promise.all([controller.syncBridge(), controller.startBridge(), controller.syncBridge()]);
+    const ids = new Set(started.map(m => m.installationId));
+    assert.equal(ids.size, 1, 'all concurrent starts must use the same installation id');
+    assert.equal([...ids][0], store.webbrainCloudBridgeInstallationId, 'and it matches the persisted one');
+  });
+}

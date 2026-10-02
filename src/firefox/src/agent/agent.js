@@ -7259,7 +7259,7 @@ export class Agent extends LoopDetector {
     // system prompt cannot retract it. Append the live state only for chats
     // that actually saw that note and lost their effective authorization.
     for (const tabId of [...this.apiAllowedInjected]) {
-      if (this.apiAllowedTabs.has(tabId)) continue;
+      if (this.isApiMutationsAllowed(tabId)) continue;
       const messages = this.conversations.get(tabId);
       if (Array.isArray(messages)) {
         messages.push(this._appOwnedUserMessage(

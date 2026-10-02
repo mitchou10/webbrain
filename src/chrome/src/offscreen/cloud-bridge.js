@@ -140,6 +140,7 @@
           } else {
             approval = 'rejected';
             lastError = String(msg.reason || 'Connection rejected by backend');
+            // A backoff timer from an earlier socket must not reconnect a rejected browser.
             if (reconnectTimer) clearTimeout(reconnectTimer);
             reconnectTimer = null;
             try { nextSocket.close(); } catch {}

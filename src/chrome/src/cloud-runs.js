@@ -1393,17 +1393,30 @@ export function createCloudRunController({
 
   // Persistent bridge identity (chrome.storage.local). The token is the Cloud
   // Bridge credential only; it is unrelated to provider API keys.
+  //
+  // Concurrent starts (a settings save triggers syncBridge while the page also
+  // sends cloud_bridge_start) must not each mint an installation id, so the
+  // read-or-create step is single-flight.
+  let installationIdInit = null;
+  function ensureInstallationId() {
+    if (!installationIdInit) {
+      installationIdInit = (async () => {
+        const stored = await api.storage.local.get('webbrainCloudBridgeInstallationId');
+        if (stored.webbrainCloudBridgeInstallationId) return stored.webbrainCloudBridgeInstallationId;
+        const created = crypto.randomUUID();
+        await api.storage.local.set({ webbrainCloudBridgeInstallationId: created });
+        return created;
+      })().finally(() => { installationIdInit = null; });
+    }
+    return installationIdInit;
+  }
+
   async function bridgeIdentity() {
+    const installationId = await ensureInstallationId();
     const stored = await api.storage.local.get([
       'webbrainCloudBridgeToken',
       'webbrainCloudBridgeBrowserId',
-      'webbrainCloudBridgeInstallationId',
     ]);
-    let installationId = stored.webbrainCloudBridgeInstallationId;
-    if (!installationId) {
-      installationId = crypto.randomUUID();
-      await api.storage.local.set({ webbrainCloudBridgeInstallationId: installationId });
-    }
     return {
       token: stored.webbrainCloudBridgeToken || '',
       browserId: stored.webbrainCloudBridgeBrowserId || installationId,
