@@ -1391,9 +1391,34 @@ export function createCloudRunController({
     return cloudSnapshot(run);
   }
 
+  // Persistent bridge identity (chrome.storage.local). The token is the Cloud
+  // Bridge credential only; it is unrelated to provider API keys.
+  async function bridgeIdentity() {
+    const stored = await api.storage.local.get([
+      'webbrainCloudBridgeToken',
+      'webbrainCloudBridgeBrowserId',
+      'webbrainCloudBridgeInstallationId',
+    ]);
+    let installationId = stored.webbrainCloudBridgeInstallationId;
+    if (!installationId) {
+      installationId = crypto.randomUUID();
+      await api.storage.local.set({ webbrainCloudBridgeInstallationId: installationId });
+    }
+    return {
+      token: stored.webbrainCloudBridgeToken || '',
+      browserId: stored.webbrainCloudBridgeBrowserId || installationId,
+      installationId,
+      extensionVersion: api.runtime.getManifest?.().version || '',
+    };
+  }
+
   async function startBridge(url = DEFAULT_CLOUD_BRIDGE_URL) {
     await ensureOffscreen();
-    return api.runtime.sendMessage({ type: 'cloud-bridge-start', url: normalizeCloudBridgeUrl(url) });
+    return api.runtime.sendMessage({
+      type: 'cloud-bridge-start',
+      url: normalizeCloudBridgeUrl(url),
+      ...(await bridgeIdentity()),
+    });
   }
 
   async function stopBridge() {
